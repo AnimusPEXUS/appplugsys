@@ -1,6 +1,8 @@
 package appplugsys
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"sync"
 	"time"
@@ -14,7 +16,7 @@ type DBPluginInfo struct {
 	BuiltIn     bool
 	Sha512      string
 	Enabled     bool
-	LastDBReKey *time.Time
+	LastDBReKey time.Time
 	Key         string
 }
 
@@ -39,13 +41,14 @@ type AppPlugSys struct {
 
 	plugins map[string]*PluginWrap
 
-	getPluginDB func(*DBPluginInfo) (*gorm.DB, error)
+	getPluginDB func(*DBPluginInfo) (*gorm.DB, bool, bool, error)
 
 	lock *sync.Mutex
 }
 
 func NewAppPlugSys(
 	db *gorm.DB,
+	getPluginDB func(*DBPluginInfo) (*gorm.DB, bool, bool, error),
 	plugin_searcher PluginSearcherI, // to find already accepted plugin
 ) (*AppPlugSys, error) {
 	self := new(AppPlugSys)
@@ -182,15 +185,42 @@ func (self *AppPlugSys) acceptPlugin(
 			BuiltIn:     plugwrap.BuiltIn,
 			Sha512:      plugwrap.Sha512,
 			Enabled:     false,
-			LastDBReKey: nil,
+			LastDBReKey: time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),
 			Key:         "",
 		}
 
 	}
 
-	plug_db, err := self.getPluginDB(plugin_status)
+	plug_db, need_key, need_rekey, err := self.getPluginDB(plugin_status)
 	if err != nil {
 		return err
+	}
+
+	if need_key || need_rekey {
+
+		buff := make([]byte, 50)
+		rand.Read(buff)
+		buff_str := base64.RawStdEncoding.EncodeToString(buff)
+
+		cmd := "key"
+		if need_rekey {
+			cmd = "rekey"
+		}
+
+		p := "PRAGMA " + cmd + " = '" + plugin_status.Key + "';"
+		err = plug_db.Exec(p).Error
+		if err != nil {
+			return err
+		}
+
+		plugin_status.Key = buff_str
+		plugin_status.LastDBReKey = time.Now().UTC()
+
+		err = self.db.Update(plugin_status).Error
+		if err != nil {
+			return err
+		}
+
 	}
 
 	plugsysiface, err := NewAppPlugSysIface(plugwrap)
