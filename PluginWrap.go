@@ -6,8 +6,7 @@ type PluginWrap struct {
 
 	Plugin *Plugin
 
-	sys    *AppPlugSys
-	pitaps *PluginInterfaceToAppPlugSys
+	sys *AppPlugSys
 }
 
 func NewPluginWrapFromSearchItem(
@@ -35,11 +34,4 @@ func NewPluginWrapFromSearchItem(
 	self.sys = sys
 
 	return self, nil
-}
-
-func (self *PluginWrap) AppPlugSysIface() *PluginInterfaceToAppPlugSys {
-	if self.pitaps == nil {
-		self.pitaps = &PluginInterfaceToAppPlugSys{}
-	}
-	return self.pitaps
 }

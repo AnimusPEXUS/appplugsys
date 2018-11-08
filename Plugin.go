@@ -1,6 +1,9 @@
 package appplugsys
 
-import "github.com/AnimusPEXUS/utils/worker"
+import (
+	"github.com/AnimusPEXUS/utils/worker"
+	"github.com/jinzhu/gorm"
+)
 
 type Plugin struct {
 	Name        string
@@ -11,7 +14,7 @@ type Plugin struct {
 
 	Requires []string // unique names of required plugins
 
-	Init    func(*PluginInterfaceToAppPlugSys) error
+	Init    func(*gorm.DB) error
 	Destroy func() error
 
 	Worker *worker.Worker // set this to nil, if plugin does not support this

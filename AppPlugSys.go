@@ -23,13 +23,12 @@ func (DBPluginInfo) TableName() string {
 }
 
 type AppPlugSysStatusDisplayLine struct {
-	Sha512  string
-	BuiltIn bool
-	Found   bool
-
-	Enabled   bool
-	AutoStart bool
-
+	Name         string
+	Sha512       string
+	BuiltIn      bool
+	Found        bool
+	Enabled      bool
+	AutoStart    bool
 	WorkerStatus *workerstatus.WorkerStatus // nil if not worker
 }
 
@@ -75,8 +74,18 @@ func NewAppPlugSys(
 	return self, nil
 }
 
-func (self *AppPlugSys) PluginInfoTable() {
+func (self *AppPlugSys) PluginInfoTable() map[string]*AppPlugSysStatusDisplayLine {
 
+	ret := make(map[string]*AppPlugSysStatusDisplayLine)
+
+	for k, v := range self.plugins {
+		ret[k] = &AppPlugSysStatusDisplayLine{
+			Name:    v.Name,
+			BuiltIn: v.BuiltIn,
+		}
+	}
+
+	return ret
 }
 
 func (self *AppPlugSys) GetPluginByName(name string) (ret *PluginWrap, err error) {
@@ -86,19 +95,14 @@ func (self *AppPlugSys) GetPluginByName(name string) (ret *PluginWrap, err error
 	return self.getPluginByName(name)
 }
 
-func (self *AppPlugSys) getPluginByName(name string) (ret *PluginWrap, err error) {
+func (self *AppPlugSys) getPluginByName(name string) (*PluginWrap, error) {
 
-	ret = nil
-	err = errors.New("not found")
-
-	for k, v := range self.plugins {
-		if k == name {
-			ret = v
-			return
-		}
+	ret, ok := self.plugins[name]
+	if !ok {
+		return nil, errors.New("not found")
 	}
 
-	return
+	return ret, nil
 }
 
 func (self *AppPlugSys) internalMethodToLoadAllPlugins() error {
@@ -144,9 +148,10 @@ func (self *AppPlugSys) internalMethodToLoadPlugin(plugin_status *DBPluginInfo) 
 		return err
 	}
 
-	pw.Plugin.Init(pw.AppPlugSysIface())
-
-	self.plugins[res.Name] = pw
+	err = self.acceptPlugin(pw, plugin_status, true)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -155,10 +160,14 @@ func (self *AppPlugSys) AcceptPlugin(plugwrap *PluginWrap) error {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	return self.acceptPlugin(plugwrap, false)
+	return self.acceptPlugin(plugwrap, nil, false)
 }
 
-func (self *AppPlugSys) acceptPlugin(plugwrap *PluginWrap, no_register bool) error {
+func (self *AppPlugSys) acceptPlugin(
+	plugwrap *PluginWrap,
+	plugin_status *DBPluginInfo,
+	no_register bool,
+) error {
 
 	if plugwrap == nil {
 		return errors.New("plugwrap must be not nil")
@@ -169,11 +178,13 @@ func (self *AppPlugSys) acceptPlugin(plugwrap *PluginWrap, no_register bool) err
 		return errors.New("already have accepted plugin with this name")
 	}
 
-	self.plugins[plugwrap.Name] = plugwrap
+	create_record := false
 
-	if !no_register {
+	if plugin_status == nil {
 
-		prec := &DBPluginInfo{
+		create_record = true
+
+		plugin_status = &DBPluginInfo{
 			Name:        plugwrap.Name,
 			BuiltIn:     plugwrap.BuiltIn,
 			Sha512:      plugwrap.Sha512,
@@ -182,9 +193,32 @@ func (self *AppPlugSys) acceptPlugin(plugwrap *PluginWrap, no_register bool) err
 			Key:         "",
 		}
 
-		err := self.db.Create(&prec).Error
-		if err != nil {
-			return err
+	}
+
+	plug_db, err := self.getPluginDB(plugin_status)
+	if err != nil {
+		return err
+	}
+
+	err = plugwrap.Plugin.Init(plug_db)
+	if err != nil {
+		return err
+	}
+
+	self.plugins[plugwrap.Name] = plugwrap
+
+	if !no_register {
+
+		if create_record {
+			err = self.db.Create(&plugin_status).Error
+			if err != nil {
+				return err
+			}
+		} else {
+			err = self.db.Update(&plugin_status).Error
+			if err != nil {
+				return err
+			}
 		}
 	}
 
