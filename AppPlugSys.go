@@ -5,20 +5,32 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AnimusPEXUS/utils/worker/workerstatus"
 	"github.com/jinzhu/gorm"
 )
 
 type DBPluginInfo struct {
 	Name        string `gorm:"primary_key"`
-	Builtin     bool
+	BuiltIn     bool
 	Sha512      string
 	Enabled     bool
 	LastDBReKey *time.Time
-	DBKey       string
+	Key         string
 }
 
 func (DBPluginInfo) TableName() string {
 	return "plugin_info"
+}
+
+type AppPlugSysStatusDisplayLine struct {
+	Sha512  string
+	BuiltIn bool
+	Found   bool
+
+	Enabled   bool
+	AutoStart bool
+
+	WorkerStatus *workerstatus.WorkerStatus // nil if not worker
 }
 
 type AppPlugSys struct {
@@ -27,33 +39,32 @@ type AppPlugSys struct {
 	passthrough_data interface{}
 
 	plugin_searcher PluginSearcherI
-	plugin_opener   PluginOpenerI
 
-	// builtin safe trusted plugins
-	internal_plugins map[string]*PluginWrap
+	plugins map[string]*PluginWrap
 
-	// heterogeneous plugins
-	external_plugins map[string]*PluginWrap
+	getPluginDB func(*DBPluginInfo) (*gorm.DB, error)
 
 	lock *sync.Mutex
 }
 
 func NewAppPlugSys(
 	db *gorm.DB,
-	plugin_searcher PluginSearcherI,
-	plugin_opener PluginOpenerI,
+
+	plugin_searcher PluginSearcherI, // to find already accepted plugin
+	//	plugin_opener PluginOpenerI, // to confirm and open external plugin
+	//	plugin_acceptor PluginAcceptorI, // confirm acception of any plugin
+
 	passthrough_data interface{},
 ) (*AppPlugSys, error) {
 	self := new(AppPlugSys)
 
 	self.db = db
 	self.plugin_searcher = plugin_searcher
+	//	self.plugin_opener = plugin_opener
 
 	self.lock = &sync.Mutex{}
 
-	self.internal_plugins = make(map[string]*PluginWrap)
-
-	self.external_plugins = make(map[string]*PluginWrap)
+	self.plugins = make(map[string]*PluginWrap)
 
 	if !db.HasTable(&DBPluginInfo{}) {
 		if err := db.CreateTable(&DBPluginInfo{}).Error; err != nil {
@@ -62,6 +73,32 @@ func NewAppPlugSys(
 	}
 
 	return self, nil
+}
+
+func (self *AppPlugSys) PluginInfoTable() {
+
+}
+
+func (self *AppPlugSys) GetPluginByName(name string) (ret *PluginWrap, err error) {
+	self.lock.Lock()
+	defer self.lock.Unlock()
+
+	return self.getPluginByName(name)
+}
+
+func (self *AppPlugSys) getPluginByName(name string) (ret *PluginWrap, err error) {
+
+	ret = nil
+	err = errors.New("not found")
+
+	for k, v := range self.plugins {
+		if k == name {
+			ret = v
+			return
+		}
+	}
+
+	return
 }
 
 func (self *AppPlugSys) internalMethodToLoadAllPlugins() error {
@@ -85,120 +122,96 @@ func (self *AppPlugSys) internalMethodToLoadAllPlugins() error {
 }
 
 func (self *AppPlugSys) internalMethodToLoadPlugin(plugin_status *DBPluginInfo) error {
-	if plugin_status.Builtin {
-		res, err := self.plugin_searcher.FindBuiltIn(plugin_status.Name)
+
+	var err error
+	var res *PluginSearcherSearchResultItem
+
+	if plugin_status.BuiltIn {
+		res, err = self.plugin_searcher.FindBuiltIn(plugin_status.Name)
 		if err != nil {
 			return err
 		}
 
-		pw, err := NewPluginWrapFromSearchItem(res, self)
-		if err != nil {
-			return err
-		}
-
-		pw.Plugin.Init(pw.AppPlugSysIface())
-
-		self.internal_plugins[res.Name] = pw
 	} else {
-		res, err := self.plugin_searcher.FindBySha512(plugin_status.Sha512)
+		res, err = self.plugin_searcher.FindBySha512(plugin_status.Sha512)
 		if err != nil {
 			return err
 		}
-
-		pw, err := NewPluginWrapFromSearchItem(res, self)
-		if err != nil {
-			return err
-		}
-
-		pw.Plugin.Init(pw.AppPlugSysIface())
-
-		self.external_plugins[res.Name] = pw
 	}
+
+	pw, err := NewPluginWrapFromSearchItem(res, self)
+	if err != nil {
+		return err
+	}
+
+	pw.Plugin.Init(pw.AppPlugSysIface())
+
+	self.plugins[res.Name] = pw
 
 	return nil
 }
 
-func (self *AppPlugSys) AcceptInternalPlugin(plugwrap *PluginWrap) error {
+func (self *AppPlugSys) AcceptPlugin(plugwrap *PluginWrap) error {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	return self.acceptInternalPlugin(plugwrap)
+	return self.acceptPlugin(plugwrap, false)
 }
 
-func (self *AppPlugSys) acceptInternalPlugin(plugwrap *PluginWrap) error {
+func (self *AppPlugSys) acceptPlugin(plugwrap *PluginWrap, no_register bool) error {
 
 	if plugwrap == nil {
 		return errors.New("plugwrap must be not nil")
 	}
 
-	err := self.removeExternalPlugin(plugwrap.Name)
+	_, ok := self.plugins[plugwrap.Name]
+	if ok {
+		return errors.New("already have accepted plugin with this name")
+	}
+
+	self.plugins[plugwrap.Name] = plugwrap
+
+	if !no_register {
+
+		prec := &DBPluginInfo{
+			Name:        plugwrap.Name,
+			BuiltIn:     plugwrap.BuiltIn,
+			Sha512:      plugwrap.Sha512,
+			Enabled:     false,
+			LastDBReKey: nil,
+			Key:         "",
+		}
+
+		err := self.db.Create(&prec).Error
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (self *AppPlugSys) RemovePlugin(name string) error {
+	self.lock.Lock()
+	defer self.lock.Unlock()
+
+	return self.removePlugin(name)
+}
+
+func (self *AppPlugSys) removePlugin(name string) error {
+
+	pw, ok := self.plugins[name]
+	if ok {
+		if pw.Plugin.Worker != nil {
+			pw.Plugin.Worker.Stop()
+		}
+		delete(self.plugins, name)
+	}
+
+	err := self.db.Where("name = ?", name).Delete(&DBPluginInfo{}).Error
 	if err != nil {
 		return err
 	}
-
-	self.internal_plugins[plugwrap.Name] = plugwrap
-
-	return nil
-}
-
-func (self *AppPlugSys) RemoveInternalPlugin(unique_name string) error {
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
-	return self.removeInternalPlugin(unique_name)
-}
-
-func (self *AppPlugSys) removeInternalPlugin(unique_name string) error {
-	plugwrap, ok := self.internal_plugins[unique_name]
-	if !ok {
-		return nil
-	}
-
-	if plugwrap.Plugin.Worker != nil {
-		plugwrap.Plugin.Worker.Stop()
-	}
-
-	delete(self.internal_plugins, unique_name)
-
-	return nil
-}
-
-// leave name empty to automatically discover it
-// leave path empty to automatically discover it
-func (self *AppPlugSys) AcceptExternalPlugin(sha512 string, name string, path string) {
-
-	if sha512 != "" && name != "" {
-		ps := &DBPluginInfo{
-			Name:        name,
-			Builtin:     false,
-			Sha512:      sha512,
-			Enabled:     true,
-			LastDBReKey: nil,
-			DBKey:       "",
-		}
-		self.db.Create(ps)
-	}
-	return
-}
-
-func (self *AppPlugSys) RemoveExternalPlugin(name string) error {
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
-	return self.removeExternalPlugin(name)
-}
-
-func (self *AppPlugSys) removeExternalPlugin(name string) error {
-	plugwrap, ok := self.external_plugins[name]
-	if !ok {
-		return nil
-	}
-
-	if plugwrap.Plugin.Worker != nil {
-		plugwrap.Plugin.Worker.Stop()
-	}
-
-	delete(self.external_plugins, name)
 
 	return nil
 }

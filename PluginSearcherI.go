@@ -11,7 +11,3 @@ type PluginSearcherI interface {
 	FindBuiltIn(name string) (*PluginSearcherSearchResultItem, error)
 	FindBySha512(sha512 string) (*PluginSearcherSearchResultItem, error)
 }
-
-type PluginSearcher struct {
-	builtin_blugins []*Plugin
-}

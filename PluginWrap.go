@@ -2,6 +2,7 @@ package appplugsys
 
 type PluginWrap struct {
 	BasicPluginInfo
+	Enabled bool
 
 	Plugin *Plugin
 
