@@ -14,7 +14,7 @@ type Plugin struct {
 
 	Requires []string // unique names of required plugins
 
-	Init    func(*gorm.DB) error
+	Init    func(iface *AppPlugSysIface, db *gorm.DB) error
 	Destroy func() error
 
 	Worker *worker.Worker // set this to nil, if plugin does not support this
@@ -23,7 +23,7 @@ type Plugin struct {
 
 	Display func() error // set this to nil, if plugin does not support this
 
-	Applications []*PluginApplication
+	Applications map[string]*PluginApplication
 }
 
 type BasicPluginInfo struct {

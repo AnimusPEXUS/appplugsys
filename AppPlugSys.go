@@ -200,7 +200,12 @@ func (self *AppPlugSys) acceptPlugin(
 		return err
 	}
 
-	err = plugwrap.Plugin.Init(plug_db)
+	plugsysiface, err := NewAppPlugSysIface(plugwrap)
+	if err != nil {
+		return err
+	}
+
+	err = plugwrap.Plugin.Init(plugsysiface, plug_db)
 	if err != nil {
 		return err
 	}
