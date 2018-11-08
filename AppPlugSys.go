@@ -35,8 +35,6 @@ type AppPlugSysStatusDisplayLine struct {
 type AppPlugSys struct {
 	db *gorm.DB
 
-	passthrough_data interface{}
-
 	plugin_searcher PluginSearcherI
 
 	plugins map[string]*PluginWrap
@@ -48,12 +46,7 @@ type AppPlugSys struct {
 
 func NewAppPlugSys(
 	db *gorm.DB,
-
 	plugin_searcher PluginSearcherI, // to find already accepted plugin
-	//	plugin_opener PluginOpenerI, // to confirm and open external plugin
-	//	plugin_acceptor PluginAcceptorI, // confirm acception of any plugin
-
-	passthrough_data interface{},
 ) (*AppPlugSys, error) {
 	self := new(AppPlugSys)
 
