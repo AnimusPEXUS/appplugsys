@@ -116,16 +116,15 @@ func (self *AppPlugSys) ApplicationInfoTable() []*AppPlugSysApplicationDisplayIt
 	for k, v := range self.plugins {
 
 		for _, v1 := range v.Plugin.Applications {
-			ret = append(
-				ret,
-				&AppPlugSysApplicationDisplayItem{
-					Title:       v1.Title,
-					Name:        v1.Name,
-					Description: v1.Description,
-					Icon:        v1.Icon,
-					PluginName:  k,
-				},
-			)
+			r := &AppPlugSysApplicationDisplayItem{
+				Title:       v1.Title,
+				Icon:        v1.Icon,
+				PluginName:  k,
+				Name:        v1.Name,
+				Description: v1.Description,
+			}
+
+			ret = append(ret, r)
 
 		}
 
