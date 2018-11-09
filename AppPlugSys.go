@@ -111,23 +111,22 @@ func (self *AppPlugSys) PluginInfoTable() map[string]*AppPlugSysPluginDisplayIte
 
 func (self *AppPlugSys) ApplicationInfoTable() []*AppPlugSysApplicationDisplayItem {
 
-	ret := make(map[string]*AppPlugSysPluginDisplayItem)
+	ret := make([]*AppPlugSysApplicationDisplayItem, 0)
 
 	for k, v := range self.plugins {
 
-		ws := ""
-		if v.Plugin.Worker != nil {
-			ws = v.Plugin.Worker.Status().String()
-		}
+		for _, v1 := range v.Plugin.Applications {
+			ret = append(
+				ret,
+				&AppPlugSysApplicationDisplayItem{
+					Title:       v1.Title,
+					Name:        v1.Name,
+					Description: v1.Description,
+					Icon:        v1.Icon,
+					PluginName:  k,
+				},
+			)
 
-		ret[k] = &AppPlugSysPluginDisplayItem{
-			Name:         v.Name,
-			BuiltIn:      v.BuiltIn,
-			Enabled:      v.Enabled,
-			Sha512:       v.Sha512,
-			WorkerStatus: ws,
-			Found:        v.Plugin != nil,
-			LastDBReKey:  v.LastBDReKey,
 		}
 
 	}
