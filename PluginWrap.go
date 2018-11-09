@@ -1,8 +1,11 @@
 package appplugsys
 
+import "time"
+
 type PluginWrap struct {
 	BasicPluginInfo
-	Enabled bool
+	Enabled     bool
+	LastBDReKey time.Time
 
 	Plugin *Plugin
 
@@ -31,6 +34,7 @@ func NewPluginWrapFromSearchItem(
 		}
 	}
 
+	self.Plugin = psri.Plugin
 	self.sys = sys
 
 	return self, nil

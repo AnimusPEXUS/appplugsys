@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AnimusPEXUS/utils/worker/workerstatus"
 	"github.com/jinzhu/gorm"
 )
 
@@ -24,14 +23,25 @@ func (DBPluginInfo) TableName() string {
 	return "plugin_info"
 }
 
-type AppPlugSysStatusDisplayLine struct {
+type AppPlugSysPluginDisplayItem struct {
 	Name         string
 	Sha512       string
 	BuiltIn      bool
 	Found        bool
 	Enabled      bool
 	AutoStart    bool
-	WorkerStatus *workerstatus.WorkerStatus // nil if not worker
+	WorkerStatus string
+	LastDBReKey  time.Time
+	//	NotInDB      bool
+	//	DBError      bool
+}
+
+type AppPlugSysApplicationDisplayItem struct {
+	Title       string
+	Icon        []byte
+	PluginName  string
+	Name        string
+	Description string
 }
 
 type AppPlugSys struct {
@@ -55,6 +65,7 @@ func NewAppPlugSys(
 
 	self.db = db
 	self.plugin_searcher = plugin_searcher
+	self.getPluginDB = getPluginDB
 	//	self.plugin_opener = plugin_opener
 
 	self.lock = &sync.Mutex{}
@@ -67,18 +78,58 @@ func NewAppPlugSys(
 		}
 	}
 
+	self.internalMethodToLoadAllPlugins()
+
 	return self, nil
 }
 
-func (self *AppPlugSys) PluginInfoTable() map[string]*AppPlugSysStatusDisplayLine {
+func (self *AppPlugSys) PluginInfoTable() map[string]*AppPlugSysPluginDisplayItem {
 
-	ret := make(map[string]*AppPlugSysStatusDisplayLine)
+	ret := make(map[string]*AppPlugSysPluginDisplayItem)
 
 	for k, v := range self.plugins {
-		ret[k] = &AppPlugSysStatusDisplayLine{
-			Name:    v.Name,
-			BuiltIn: v.BuiltIn,
+
+		ws := ""
+		if v.Plugin.Worker != nil {
+			ws = v.Plugin.Worker.Status().String()
 		}
+
+		ret[k] = &AppPlugSysPluginDisplayItem{
+			Name:         v.Name,
+			BuiltIn:      v.BuiltIn,
+			Enabled:      v.Enabled,
+			Sha512:       v.Sha512,
+			WorkerStatus: ws,
+			Found:        v.Plugin != nil,
+			LastDBReKey:  v.LastBDReKey,
+		}
+
+	}
+
+	return ret
+}
+
+func (self *AppPlugSys) ApplicationInfoTable() []*AppPlugSysApplicationDisplayItem {
+
+	ret := make(map[string]*AppPlugSysPluginDisplayItem)
+
+	for k, v := range self.plugins {
+
+		ws := ""
+		if v.Plugin.Worker != nil {
+			ws = v.Plugin.Worker.Status().String()
+		}
+
+		ret[k] = &AppPlugSysPluginDisplayItem{
+			Name:         v.Name,
+			BuiltIn:      v.BuiltIn,
+			Enabled:      v.Enabled,
+			Sha512:       v.Sha512,
+			WorkerStatus: ws,
+			Found:        v.Plugin != nil,
+			LastDBReKey:  v.LastBDReKey,
+		}
+
 	}
 
 	return ret
@@ -162,7 +213,7 @@ func (self *AppPlugSys) AcceptPlugin(plugwrap *PluginWrap) error {
 func (self *AppPlugSys) acceptPlugin(
 	plugwrap *PluginWrap,
 	plugin_status *DBPluginInfo,
-	no_register bool,
+	no_create bool,
 ) error {
 
 	if plugwrap == nil {
@@ -178,15 +229,25 @@ func (self *AppPlugSys) acceptPlugin(
 
 	if plugin_status == nil {
 
-		create_record = true
+		plugin_status = new(DBPluginInfo)
 
-		plugin_status = &DBPluginInfo{
-			Name:        plugwrap.Name,
-			BuiltIn:     plugwrap.BuiltIn,
-			Sha512:      plugwrap.Sha512,
-			Enabled:     false,
-			LastDBReKey: time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),
-			Key:         "",
+		err := self.db.Where("name = ?", plugwrap.Name).Take(&plugin_status).Error
+		if err != nil {
+			if err != gorm.ErrRecordNotFound {
+				return err
+			} else {
+				create_record = true
+
+				plugin_status = &DBPluginInfo{
+					Name:        plugwrap.Name,
+					BuiltIn:     plugwrap.BuiltIn,
+					Sha512:      plugwrap.Sha512,
+					Enabled:     false,
+					LastDBReKey: time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),
+					Key:         "",
+				}
+
+			}
 		}
 
 	}
@@ -216,16 +277,15 @@ func (self *AppPlugSys) acceptPlugin(
 		plugin_status.Key = buff_str
 		plugin_status.LastDBReKey = time.Now().UTC()
 
-		err = self.db.Update(plugin_status).Error
-		if err != nil {
-			return err
-		}
-
 	}
 
 	plugsysiface, err := NewAppPlugSysIface(plugwrap)
 	if err != nil {
 		return err
+	}
+
+	if plugwrap.Plugin == nil {
+		panic("plugwrap.Plugin == nil")
 	}
 
 	err = plugwrap.Plugin.Init(plugsysiface, plug_db)
@@ -235,18 +295,17 @@ func (self *AppPlugSys) acceptPlugin(
 
 	self.plugins[plugwrap.Name] = plugwrap
 
-	if !no_register {
-
-		if create_record {
+	if create_record {
+		if !no_create {
 			err = self.db.Create(&plugin_status).Error
 			if err != nil {
 				return err
 			}
-		} else {
-			err = self.db.Update(&plugin_status).Error
-			if err != nil {
-				return err
-			}
+		}
+	} else {
+		err = self.db.Save(&plugin_status).Error
+		if err != nil {
+			return err
 		}
 	}
 
