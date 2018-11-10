@@ -103,7 +103,6 @@ func (self *AppPlugSys) PluginInfoTable() map[string]*AppPlugSysPluginDisplayIte
 			Found:        v.Plugin != nil,
 			LastDBReKey:  v.LastBDReKey,
 		}
-
 	}
 
 	return ret
@@ -125,9 +124,7 @@ func (self *AppPlugSys) ApplicationInfoTable() []*AppPlugSysApplicationDisplayIt
 			}
 
 			ret = append(ret, r)
-
 		}
-
 	}
 
 	return ret
@@ -332,5 +329,21 @@ func (self *AppPlugSys) removePlugin(name string) error {
 		return err
 	}
 
+	return nil
+}
+
+func (self *AppPlugSys) DisplayApplication(plugin_name string, name string) error {
+	for k, v := range self.plugins {
+		if k == plugin_name {
+			for k2, v2 := range v.Plugin.Applications {
+				if k2 == name {
+					err := v2.Display()
+					if err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
 	return nil
 }
